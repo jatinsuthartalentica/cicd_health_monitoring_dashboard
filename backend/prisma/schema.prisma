@@ -1,0 +1,34 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Build {
+  id           Int      @id @default(autoincrement())
+  provider     String
+  pipeline     String
+  status       String   // success | failure | running
+  durationSec  Float
+  startedAt    DateTime @default(now())
+  finishedAt   DateTime?
+  commit       String?
+  branch       String?
+  logs         String?
+  createdAt    DateTime @default(now())
+  externalId   String?  @unique
+  alertedAt    DateTime?
+}
+
+model Repository {
+  id        Int      @id @default(autoincrement())
+  owner     String
+  repo      String
+  branch    String?  // optional, if null poll default branch
+  tokenEnc  String?  // encrypted token (optional)
+  createdAt DateTime @default(now())
+  @@unique([owner, repo, branch])
+}

@@ -1,0 +1,63 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: cicd-db
+    environment:
+      POSTGRES_USER: cicd
+      POSTGRES_PASSWORD: cicd
+      POSTGRES_DB: cicd
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: ./backend
+    container_name: cicd-api
+    environment:
+      - DATABASE_URL=postgresql://cicd:cicd@db:5432/cicd?schema=public
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - INTERNAL_TOKEN=${INTERNAL_TOKEN}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - PORT=8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    # volumes removed to avoid compose v1 'ContainerConfig' bug
+
+
+  worker:
+    build: ./worker
+    container_name: cicd-worker
+    environment:
+      - API_BASE=http://api:8080
+      - INTERVAL_SECONDS=15
+      - FAILURE_RATE=0.3
+      - PROVIDER=github
+      - PIPELINE=jatinsuthartalentica/AI-Ticket-Estimator/main
+      - MODE=github
+      - GITHUB_OWNER=jatinsuthartalentica
+      - GITHUB_REPO=AI-Ticket-Estimator
+      - INTERNAL_TOKEN=${INTERNAL_TOKEN}
+    depends_on:
+      - api
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: http://localhost:8080
+    container_name: cicd-web
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

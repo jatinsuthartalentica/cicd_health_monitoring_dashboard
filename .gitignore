@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+worker/node_modules/
+
+# Build outputs
+frontend/dist/
+*.log
+
+# Environment & secrets
+.env
+secrets/
+
+# Editor/OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Prisma artifacts
+backend/prisma/*.db
+
+# Docker
+*.pid
