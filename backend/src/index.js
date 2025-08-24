@@ -195,6 +195,117 @@ app.post('/api/repos/:id/update', async (req, res) => {
   }
 });
 
+// Build logs: fetch GitHub jobs & steps and render text summary
+app.get('/api/builds/:id/logs', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).send('invalid id');
+  try {
+    const b = await prisma.build.findUnique({ where: { id } });
+    if (!b) return res.status(404).send('not found');
+    // Expect pipeline as owner/repo/branch and externalId as GitHub run id
+    const parts = String(b.pipeline || '').split('/');
+    if (parts.length < 2 || !b.externalId) return res.status(400).send('no external logs available');
+    const owner = parts[0];
+    const repo = parts[1];
+    // Load per-repo token if present
+    const repoRow = await prisma.repository.findFirst({ where: { owner, repo } });
+    const token = repoRow?.tokenEnc ? decrypt(repoRow.tokenEnc) : undefined;
+    const headers = { 'Accept': 'application/vnd.github+json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    // Fetch jobs for the run and format
+    let page = 1; const perPage = 100; let lines = [];
+    while (true) {
+      const url = `https://api.github.com/repos/${owner}/${repo}/actions/runs/${b.externalId}/jobs?per_page=${perPage}&page=${page}`;
+      const r = await axios.get(url, { headers, timeout: 10000 });
+      const jobs = r.data?.jobs || [];
+      if (jobs.length === 0) break;
+      for (const j of jobs) {
+        lines.push(`# Job: ${j.name} [${j.status}${j.conclusion?`/${j.conclusion}`:''}]`);
+        if (j.started_at) lines.push(`  started: ${j.started_at}`);
+        if (j.completed_at) lines.push(`  completed: ${j.completed_at}`);
+        const steps = j.steps || [];
+        for (const s of steps) {
+          lines.push(`  - ${s.name} [${s.status}${s.conclusion?`/${s.conclusion}`:''}]`);
+        }
+        lines.push('');
+      }
+      page++;
+    }
+    if (lines.length === 0) lines.push('No job/step details available. Open run in browser for full logs: ' + (b.logs || ''));
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(lines.join('\n'));
+ } catch (e) {
+  console.error('build logs error', e?.response?.status, e?.message);
+  res.status(500).send('logs_unavailable');
+ }
+});
+
+// Full job logs (gzip from GitHub), optional tail=N lines
+app.get('/api/builds/:id/logs/full', async (req, res) => {
+  const id = Number(req.params.id);
+  const tail = Math.max(0, Number(req.query.tail || 0));
+  if (!id) return res.status(400).send('invalid id');
+  try {
+    const b = await prisma.build.findUnique({ where: { id } });
+    if (!b) return res.status(404).send('not found');
+    const parts = String(b.pipeline || '').split('/');
+    if (parts.length < 2 || !b.externalId) return res.status(400).send('no external logs available');
+    const owner = parts[0];
+    const repo = parts[1];
+    const repoRow = await prisma.repository.findFirst({ where: { owner, repo } });
+    const token = repoRow?.tokenEnc ? decrypt(repoRow.tokenEnc) : undefined;
+    const headers = { 'Accept': 'application/vnd.github+json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    // 1) list jobs for the run
+    const jobs = [];
+    let page = 1; const perPage = 100;
+    while (true) {
+      const url = `https://api.github.com/repos/${owner}/${repo}/actions/runs/${b.externalId}/jobs?per_page=${perPage}&page=${page}`;
+      const r = await axios.get(url, { headers, timeout: 10000 });
+      const batch = r.data?.jobs || [];
+      if (batch.length === 0) break;
+      jobs.push(...batch);
+      page++;
+    }
+    if (jobs.length === 0) return res.status(404).send('no_jobs');
+
+    // 2) for each job, download logs stream (gzip), gunzip, and collect text
+    const zlib = await import('node:zlib');
+    const logsByJob = [];
+    for (const j of jobs) {
+      try {
+        const url = `https://api.github.com/repos/${owner}/${repo}/actions/jobs/${j.id}/logs`;
+        const r = await axios.get(url, { headers, responseType: 'arraybuffer', timeout: 20000 });
+        const buf = Buffer.from(r.data);
+        const gunzipped = zlib.gunzipSync(buf).toString('utf-8');
+        logsByJob.push({ name: j.name, text: gunzipped });
+      } catch (e) {
+        logsByJob.push({ name: j.name, text: `Failed to fetch logs for job ${j.name}: ${e?.response?.status || ''} ${e?.message || e}` });
+      }
+    }
+
+    // 3) concatenate with headers
+    let all = [];
+    for (const item of logsByJob) {
+      all.push(`===== ${item.name} =====`);
+      const lines = item.text.split(/\r?\n/);
+      all.push(...lines);
+      all.push('');
+    }
+
+    // 4) tail if requested
+    if (tail > 0 && all.length > tail) {
+      all = all.slice(all.length - tail);
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(all.join('\n'));
+  } catch (e) {
+    console.error('full logs error', e?.response?.status, e?.message);
+    res.status(500).send('full_logs_unavailable');
+  }
+});
+
 app.get('/healthz', (req, res) => res.send('ok'));
 
 // Repositories CRUD

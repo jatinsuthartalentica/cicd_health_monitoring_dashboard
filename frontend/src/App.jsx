@@ -15,6 +15,33 @@ export default function App(){
   const [branch, setBranch] = useState('')
   const [branchOptions, setBranchOptions] = useState([])
   const [limit, setLimit] = useState(20)
+  const [expanded, setExpanded] = useState({}) // id -> bool
+  const [logsText, setLogsText] = useState({}) // id -> string
+  const [logsLoading, setLogsLoading] = useState({}) // id -> bool
+  const [logsError, setLogsError] = useState({}) // id -> string
+
+  function toggleExpand(id){
+    setExpanded(prev => {
+      const next = !prev[id]
+      const newState = { ...prev, [id]: next }
+      if (next && !logsText[id] && !logsLoading[id]) {
+        // fetch logs lazily
+        setLogsLoading(s => ({...s, [id]: true}))
+        setLogsError(s => ({...s, [id]: ''}))
+        fetch(`${API_BASE}/api/builds/${id}/logs`).then(async r => {
+          if (!r.ok) throw new Error(await r.text())
+          return r.text()
+        }).then(txt => {
+          setLogsText(s => ({...s, [id]: txt}))
+        }).catch(err => {
+          setLogsError(s => ({...s, [id]: err?.message || 'failed to load logs'}))
+        }).finally(()=>{
+          setLogsLoading(s => ({...s, [id]: false}))
+        })
+      }
+      return newState
+    })
+  }
 
   function qs(params){
     const sp = new URLSearchParams()
@@ -150,22 +177,88 @@ export default function App(){
         <table style={{width:'100%', borderCollapse:'separate', borderSpacing:0}}>
           <thead>
             <tr>
-              <Th>ID</Th><Th>Provider</Th><Th>Pipeline</Th><Th>Status</Th><Th>Duration</Th><Th>Commit</Th><Th>Branch</Th>
+              <Th></Th><Th>ID</Th><Th>Provider</Th><Th>Pipeline</Th><Th>Status</Th><Th>Duration</Th><Th>Commit</Th><Th>Branch</Th>
             </tr>
           </thead>
           <tbody>
             {builds.map((b, i)=> (
-              <tr key={b.id} style={{borderBottom:'1px solid #23304d', background: i%2===1?'#0e1629':'transparent'}}>
-                <Td>{b.id}</Td>
-                <Td>{b.provider}</Td>
-                <Td>{b.pipeline}</Td>
-                <Td>
-                  <StatusPill status={b.status} />
-                </Td>
-                <Td>{(b.durationSec||b.duration_sec||0).toFixed(1)}s</Td>
-                <Td><code>{b.commit||''}</code></Td>
-                <Td>{b.branch||''}</Td>
-              </tr>
+              <>
+                <tr key={`row-${b.id}`} style={{borderBottom:'1px solid #23304d', background: i%2===1?'#0e1629':'transparent'}}>
+                  <Td>
+                    <button onClick={()=>toggleExpand(b.id)} style={{background:'transparent', border:'none', color:'#e6edf3', cursor:'pointer'}} aria-label="toggle logs">
+                      {expanded[b.id] ? '▾' : '▸'}
+                    </button>
+                  </Td>
+                  <Td>{b.id}</Td>
+                  <Td>{b.provider}</Td>
+                  <Td>{b.pipeline}</Td>
+                  <Td>
+                    <StatusPill status={b.status} />
+                  </Td>
+                  <Td>{(b.durationSec||b.duration_sec||0).toFixed(1)}s</Td>
+                  <Td><code>{b.commit||''}</code></Td>
+                  <Td>{b.branch||''}</Td>
+                </tr>
+                {expanded[b.id] && (
+                  <tr key={`logs-${b.id}`}>
+                    <td colSpan={8} style={{padding:0, background:'#0b1220'}}>
+                      <div style={{maxHeight:240, overflowY:'auto', padding:12, borderTop:'1px solid #23304d'}}>
+                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
+                          <div style={{color:'#93a1b3'}}>Execution logs</div>
+                          <div style={{display:'flex', gap:12, alignItems:'center'}}>
+                            <button
+                              onClick={()=>{
+                                setLogsLoading(s => ({...s, [b.id]: true}))
+                                setLogsError(s => ({...s, [b.id]: ''}))
+                                fetch(`${API_BASE}/api/builds/${b.id}/logs/full?tail=200`).then(async r=>{
+                                  if(!r.ok) throw new Error(await r.text())
+                                  return r.text()
+                                }).then(txt=>{
+                                  setLogsText(s=>({...s, [b.id]: txt}))
+                                }).catch(err=>{
+                                  setLogsError(s=>({...s, [b.id]: err?.message || 'failed to load full logs'}))
+                                }).finally(()=>{
+                                  setLogsLoading(s=>({...s, [b.id]: false}))
+                                })
+                              }}
+                              style={{...btnStyle, padding:'4px 8px'}}
+                            >Tail 200</button>
+                            <button
+                              onClick={()=>{
+                                setLogsLoading(s => ({...s, [b.id]: true}))
+                                setLogsError(s => ({...s, [b.id]: ''}))
+                                fetch(`${API_BASE}/api/builds/${b.id}/logs/full?tail=1000`).then(async r=>{
+                                  if(!r.ok) throw new Error(await r.text())
+                                  return r.text()
+                                }).then(txt=>{
+                                  setLogsText(s=>({...s, [b.id]: txt}))
+                                }).catch(err=>{
+                                  setLogsError(s=>({...s, [b.id]: err?.message || 'failed to load full logs'}))
+                                }).finally(()=>{
+                                  setLogsLoading(s=>({...s, [b.id]: false}))
+                                })
+                              }}
+                              style={{...btnStyle, padding:'4px 8px'}}
+                            >Tail 1000</button>
+                            {typeof b.logs === 'string' && b.logs.startsWith('http') && (
+                              <a href={b.logs} target="_blank" rel="noreferrer" style={{color:'#1f6feb'}}>Open run ↗</a>
+                            )}
+                          </div>
+                        </div>
+                        {logsLoading[b.id] ? (
+                          <div style={{color:'#93a1b3', fontSize:12}}>Loading logs…</div>
+                        ) : logsError[b.id] ? (
+                          <div style={{color:'#ff6b6b', fontSize:12}}>Error: {logsError[b.id]}</div>
+                        ) : logsText[b.id] ? (
+                          <pre style={{whiteSpace:'pre-wrap', margin:0, fontSize:12, lineHeight:1.4}}>{logsText[b.id]}</pre>
+                        ) : (
+                          <div style={{color:'#93a1b3', fontSize:12}}>No inline logs available. Use the link above if provided.</div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
             ))}
           </tbody>
         </table>
