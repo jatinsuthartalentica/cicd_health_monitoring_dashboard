@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region for resources"
   type        = string
-  default     = "us-east-1"
+  default     = "ap-south-1"
 }
 
 variable "project_name" {
@@ -43,7 +43,7 @@ variable "ec2_instance_type" {
 variable "ec2_ami_id" {
   description = "AMI ID for EC2 instance"
   type        = string
-  default     = "ami-0c02fb55956c7d316" # Amazon Linux 2 AMI in us-east-1
+  default     = "ami-0c02fb55956c7d316" # Amazon Linux 2 AMI in ap-south-1
 }
 
 variable "db_instance_class" {

@@ -59,7 +59,7 @@ aws ec2 import-key-pair --key-name cicd-dashboard-key --public-key-material file
 Create a `terraform.tfvars` file in the `infra` directory:
 
 ```hcl
-aws_region = "us-east-1"
+aws_region = "ap-south-1"
 project_name = "cicd-health-dashboard"
 environment = "prod"
 db_password = "your-secure-password-here"
